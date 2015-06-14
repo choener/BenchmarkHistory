@@ -7,6 +7,7 @@ import           GHC.Stats
 import           Data.Csv
 import           Data.Int(Int64)
 import           GHC.Generics
+import           System.Mem
 import           System.Directory (doesFileExist)
 import qualified Data.Vector as V
 import qualified Data.ByteString.Lazy as BSL
@@ -56,24 +57,38 @@ difference :: Int -> LocalTime -> GCStats -> GCStats -> Stats
 difference mul time pre post = Stats
                                 { timeStamp   = TimeStamp time
                                 , runningTime = gcStatDiff cpuSeconds     pre post / fromIntegral mul
-                                , bytesAlloc  = gcStatDiff bytesAllocated pre post `div` fromIntegral mul
+                                , bytesAlloc  = gcStatDiff cumulativeBytesUsed pre post `div` fromIntegral mul
                                 }
 
 -- | Benchmark a function. The function should take a /considerable amount
 -- of time/ to finish, since the benchmarking system is designed to measure
 -- coarse-grained timings.
 
-benchmark :: NFData b => Int -> String -> (a -> b) -> a -> IO ()
-benchmark mul' file fun x = do
+benchmark
+  :: (NFData e, NFData a, NFData b)
+  => Int            -- | multiplicity of the benchmark run
+  -> String         -- | name of the benchmark file
+  -> (a -> e)       -- | environment generator (not benched)
+  -> (e -> a -> b)  -- | given environment, input, create output
+  -> a              -- | input
+  -> IO ()          -- | run everything, don't communicate back
+benchmark mul' file env fun x = do
   let mul = max 1 mul'
   dfe <- doesFileExist file
   (h,xs) <- if dfe
               then do BSL.readFile file >>= (return . either error (second V.toList) . decodeByName)
               else do return (V.empty,[]) :: IO (Header, [Stats])
   time <- fmap zonedTimeToLocalTime getZonedTime
+  performGC
+  preE <- getGCStats
+  let !e = env x
+  deepseq e $ performGC
   pre <- getGCStats
-  res <- V.foldM' (\a b -> b >> return ()) () $ V.map (call fun) $ V.replicate mul x
+  print $ cumulativeBytesUsed preE
+  print $ cumulativeBytesUsed pre
+  res <- V.foldM' (\a b -> b >> return ()) () $ V.map (call $ fun e) $ V.replicate mul x
   post <- pseq res $ getGCStats
+  print $ cumulativeBytesUsed post
   let ys = difference mul time pre post : xs
   putStrLn ""
   print file
