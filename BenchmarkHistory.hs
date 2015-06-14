@@ -76,12 +76,12 @@ gcStatDiff f pre post = f post - f pre
 
 benchmark
   :: (NFData e, NFData a, NFData b)
-  => Int            -- | multiplicity of the benchmark run
-  -> String         -- | name of the benchmark file
-  -> (a -> e)       -- | environment generator (not benched)
-  -> (e -> a -> b)  -- | given environment, input, create output
-  -> a              -- | input
-  -> IO ExitCode    -- | run everything, return exit code based on performance
+  => Int            -- ^ multiplicity of the benchmark run
+  -> String         -- ^ name of the benchmark file
+  -> (a -> e)       -- ^ environment generator (not benched)
+  -> (e -> a -> b)  -- ^ given environment, input, create output
+  -> a              -- ^ input
+  -> IO ExitCode    -- ^ run everything, return exit code based on performance
 benchmark mul' file env fun x = do
   let mul = max 1 mul'
   dfe <- doesFileExist file
