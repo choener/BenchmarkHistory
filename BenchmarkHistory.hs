@@ -78,10 +78,31 @@ benchmark mul' file fun x = do
   putStrLn ""
   print file
   mapM_ print . reverse . take 10 $!! ys
+  let (gt,gm) = good 10 ys
+  print (gt,gm)
+  if gt <! 1.05 && gm <! 1.05 then print "OK" else print "performance regression!"
   BSL.writeFile file $ encodeDefaultOrderedByName ys
 {-# NoInline benchmark #-}
+
+infixl 7 <!
+
+-- | @a <! b@ is like @a < b@ but will still return @True@ if @a@ or @b@ is
+-- @NaN@
+
+a <! b
+  | isNaN a   = True
+  | isNaN b   = True
+  | otherwise = a < b
+{-# Inline (<!) #-}
 
 call :: NFData b => (a -> b) -> a -> IO b
 call f x = return $!! f x
 {-# NoInline call #-}
+
+good :: Int -> [Stats] -> (Double,Double)
+good _ []  = (1,1)
+good _ [x] = (1,1)
+good l (x:ys) = let zs = take l ys
+                    k  = L.genericLength zs
+                in  ( k * runningTime x / (sum $ map runningTime zs) , k * fromIntegral (bytesAlloc x) / fromIntegral (sum $ map bytesAlloc zs))
 

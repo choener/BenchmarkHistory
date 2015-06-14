@@ -25,6 +25,13 @@ Extra-Source-Files:
 
 
 
+flag exe
+  description:  build the exacutable. not normally done because Chart has older dependencies for some packages
+  default:      False
+  manual:       True
+
+
+
 library
   build-depends: base         >= 4.7    && < 4.9
                , bytestring   >= 0.10   && < 0.11
@@ -49,9 +56,17 @@ library
 -- Visualize the histogram of running time and allocation
 
 executable BenchmarkHistogram
-  build-depends: base
-               , cmdargs            >= 0.10 && < 0.11
-               , BenchmarkHistory
+  if flag(exe)
+    buildable:
+      True
+    build-depends: base
+                 , BenchmarkHistory
+                 , Chart              >= 1.4  && < 1.5
+                 , Chart-diagrams     >= 1.4  && < 1.5
+                 , cmdargs            >= 0.10 && < 0.11
+  else
+    buildable:
+      False
   hs-source-dirs:
     src
   default-language:
