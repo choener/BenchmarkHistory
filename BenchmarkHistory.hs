@@ -1,20 +1,24 @@
 
 module BenchmarkHistory where
 
-import           Data.Time
-import           Control.DeepSeq
-import           GHC.Stats
-import           Data.Csv
-import           Data.Int(Int64)
-import           GHC.Generics
-import           System.Mem
-import           System.Directory (doesFileExist)
-import qualified Data.Vector as V
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Char8 as BS
 import           Control.Arrow (second)
+import           Control.DeepSeq
+import           Data.Csv
+import           Data.Function (fix)
+import           Data.Int(Int64)
+import           Data.Time
 import           GHC.Conc (pseq)
+import           GHC.Generics
+import           GHC.Stats
+import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
+import qualified Data.Vector as V
+import           Statistics.Sample
+import           System.Directory (doesFileExist)
+import           System.Exit
+import           System.Mem
+import           Text.Printf
 
 
 
@@ -31,10 +35,25 @@ instance ToField TimeStamp where
 
 
 
+newtype GCStatistics = GCStatistics { getGCStatistics :: GCStats }
+  deriving (Read,Show,Generic)
+
+instance NFData GCStatistics where
+  rnf (GCStatistics !x) = ()
+
+instance FromField GCStatistics where
+  parseField = fmap (GCStatistics . read) . parseField
+
+instance ToField GCStatistics where
+  toField = toField . show . getGCStatistics
+
+
+
 data Stats = Stats
   { timeStamp   :: !TimeStamp
-  , runningTime :: !Double
-  , bytesAlloc  :: !Int64
+  , preStats    :: !GCStatistics
+  , postStats   :: !GCStatistics
+  , multiplier  :: !Int
   }
   deriving (Read,Show,Generic)
 
@@ -51,15 +70,6 @@ gcStatDiff :: Num a => (GCStats -> a) -> GCStats -> GCStats -> a
 gcStatDiff f pre post = f post - f pre
 {-# Inline gcStatDiff #-}
 
--- | Go from two @GCStats@ to a difference in terms of @Stats@.
-
-difference :: Int -> LocalTime -> GCStats -> GCStats -> Stats
-difference mul time pre post = Stats
-                                { timeStamp   = TimeStamp time
-                                , runningTime = gcStatDiff cpuSeconds     pre post / fromIntegral mul
-                                , bytesAlloc  = gcStatDiff cumulativeBytesUsed pre post `div` fromIntegral mul
-                                }
-
 -- | Benchmark a function. The function should take a /considerable amount
 -- of time/ to finish, since the benchmarking system is designed to measure
 -- coarse-grained timings.
@@ -71,7 +81,7 @@ benchmark
   -> (a -> e)       -- | environment generator (not benched)
   -> (e -> a -> b)  -- | given environment, input, create output
   -> a              -- | input
-  -> IO ()          -- | run everything, don't communicate back
+  -> IO ExitCode    -- | run everything, return exit code based on performance
 benchmark mul' file env fun x = do
   let mul = max 1 mul'
   dfe <- doesFileExist file
@@ -84,40 +94,53 @@ benchmark mul' file env fun x = do
   let !e = env x
   deepseq e $ performGC
   pre <- getGCStats
-  print $ cumulativeBytesUsed preE
-  print $ cumulativeBytesUsed pre
   res <- V.foldM' (\a b -> b >> return ()) () $ V.map (call $ fun e) $ V.replicate mul x
   post <- pseq res $ getGCStats
-  print $ cumulativeBytesUsed post
-  let ys = difference mul time pre post : xs
   putStrLn ""
-  print file
-  mapM_ print . reverse . take 10 $!! ys
-  let (gt,gm) = good 10 ys
-  print (gt,gm)
-  if gt <! 1.05 && gm <! 1.05 then print "OK" else print "performance regression!"
+  putStrLn file
+  let ys = Stats (TimeStamp time) (GCStatistics pre) (GCStatistics post) mul : xs
+  exit <- basicStats $ eachBlock cpuSeconds (\m o n -> (n-o) / fromIntegral m) $ toBlocks [1,1 ..] ys
   BSL.writeFile file $ encodeDefaultOrderedByName ys
+  return exit
 {-# NoInline benchmark #-}
-
-infixl 7 <!
-
--- | @a <! b@ is like @a < b@ but will still return @True@ if @a@ or @b@ is
--- @NaN@
-
-a <! b
-  | isNaN a   = True
-  | isNaN b   = True
-  | otherwise = a < b
-{-# Inline (<!) #-}
 
 call :: NFData b => (a -> b) -> a -> IO b
 call f x = return $!! f x
 {-# NoInline call #-}
 
-good :: Int -> [Stats] -> (Double,Double)
-good _ []  = (1,1)
-good _ [x] = (1,1)
-good l (x:ys) = let zs = take l ys
-                    k  = L.genericLength zs
-                in  ( k * runningTime x / (sum $ map runningTime zs) , k * fromIntegral (bytesAlloc x) / fromIntegral (sum $ map bytesAlloc zs))
+-- | Divide data into blocks
+
+toBlocks :: [Int] -> [a] -> [[a]]
+toBlocks _      [] = []
+toBlocks []     _  = error "not enough block division information"
+toBlocks (b:bs) xs = let (ys,zs) = splitAt b xs
+                     in  ys : toBlocks bs zs
+
+defbs = replicate 4 1 ++ fix (map (*2) . (1:))
+
+-- | for each block, perform an op and return first time stamp and op
+-- result
+
+eachBlock
+  :: (GCStats -> r)
+  -> (Int -> r -> r -> Double)
+  -> [[Stats]]
+  -> [(TimeStamp, Double)]
+eachBlock f cmb = map go . filter (not . null)
+  where go xs = (timeStamp $ head xs, mean $ V.map oneStat $ V.fromList xs)
+        oneStat s = cmb (multiplier s) (f . getGCStatistics $ preStats s) (f . getGCStatistics $ postStats s)
+
+-- | Statistics for data
+
+basicStats :: [(TimeStamp, Double)] -> IO ExitCode
+basicStats [] = return ExitSuccess
+basicStats xs' = do
+  let xs = V.fromList xs'
+  let x  = V.head xs
+  let μ = mean   $ V.map snd xs
+  let σ = stdDev $ V.map snd xs
+  printf "μ %f σ %f current: %f   (%s)\n" μ σ (snd x) (show $ snd x <= μ + σ)
+  return $ if snd x <= μ + σ
+             then ExitSuccess
+             else ExitFailure 1
 
