@@ -130,7 +130,9 @@ eachBlock f cmb = map go . filter (not . null)
   where go xs = (timeStamp $ head xs, mean $ V.map oneStat $ V.fromList xs)
         oneStat s = cmb (multiplier s) (f . getGCStatistics $ preStats s) (f . getGCStatistics $ postStats s)
 
--- | Statistics for data
+-- | Statistics for data. We allow one standard deviation or 5% of the mean
+-- as error margin before we flag the running time as being slow enough to
+-- raise an @ExitFailure 1@.
 
 basicStats :: [(TimeStamp, Double)] -> IO ExitCode
 basicStats [] = return ExitSuccess
@@ -139,8 +141,10 @@ basicStats xs' = do
   let x  = V.head xs
   let μ = mean   $ V.map snd xs
   let σ = stdDev $ V.map snd xs
-  printf "μ %f σ %f current: %f   (%s)\n" μ σ (snd x) (show $ snd x <= μ + σ)
-  return $ if snd x <= μ + σ
+  let p5 = μ * 0.05 -- 5 % ok-ness
+  let ok = snd x <= μ + max σ p5
+  printf "μ %f σ %f current: %f   (%s)\n" μ σ (snd x) (if ok then "✓" else "✗" :: String)
+  return $ if ok
              then ExitSuccess
              else ExitFailure 1
 
