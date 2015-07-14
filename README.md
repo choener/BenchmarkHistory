@@ -3,12 +3,10 @@
 # BenchmarkHistory
 
 The library provides tools for keeping a log of running time and memory
-allocation of functions one runs. The BenchmarkHistory program visualizes
-changes over time.
-
-Most recent data left, older data points more to the right, with logarithmic
-time scale.
-
+allocation of functions to be benchmarked. I use this library together with
+buildbot to be alerted when one of my programs or libraries performs much worse
+due to recent changes. The system uses the history of benchmark runs to adapt
+to changes.
 
 
 
