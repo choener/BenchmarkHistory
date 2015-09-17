@@ -1,5 +1,5 @@
 name:           BenchmarkHistory
-version:        0.0.0.1
+version:        0.0.0.2
 author:         Christian Hoener zu Siederdissen, 2015
 copyright:      Christian Hoener zu Siederdissen, 2015
 homepage:       https://github.com/choener/BenchmarkHistory
@@ -11,7 +11,7 @@ license-file:   LICENSE
 build-type:     Simple
 stability:      experimental
 cabal-version:  >= 1.10.0
-tested-with:    GHC == 7.8.4, GHC == 7.10.1
+tested-with:    GHC == 7.8.4, GHC == 7.10.2
 synopsis:       Benchmark functions with history
 description:
                 Benchmark functions via @GHC.Stats@ and keep a history of
@@ -40,7 +40,7 @@ library
                , directory
                , statistics   >= 0.13   && < 0.14
                , time
-               , vector       >= 0.10   && < 0.11
+               , vector       >= 0.10   && < 0.12
   exposed-modules:
     BenchmarkHistory
   default-language:
